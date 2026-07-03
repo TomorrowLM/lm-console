@@ -1,0 +1,12 @@
+# ============================================================
+# 跨平台符号链接配置
+# ============================================================
+# 确保符号链接在 Windows/macOS/Linux 之间正确同步
+# 要求: git config core.symlinks=true (默认已启用)
+
+# git/ 目录下的符号链接视图层 - 必须作为 symlink 存储
+/git/** text=auto eol=lf
+
+# 根目录下 gitnexus-* 反向链接 - 必须作为 symlink 存储
+/gitnexus-* text=auto eol=lf
+
