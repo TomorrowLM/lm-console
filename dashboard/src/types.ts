@@ -34,6 +34,13 @@ export interface SkillMeta {
   injectionTargets: string[];
 }
 
+export interface CacheEntry {
+  name: string;
+  category: string;
+  description: string;
+  cachedAt: string;
+}
+
 export interface McpServerMeta {
   name: string;
   command: string;

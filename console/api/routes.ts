@@ -1,6 +1,7 @@
 import { IncomingMessage, ServerResponse } from 'http';
 import type { IdeTarget, InjectScope, InjectResult } from '../core/types.js';
 import type { SkillRegistry } from '../skill/registry.js';
+import type { SkillCache, CacheEntry } from '../skill/cache.js';
 import type { SkillInjector } from '../skill/injection.js';
 import type { McpRegistry } from '../mcp/registry.js';
 import type { McpInjector } from '../mcp/injection.js';
@@ -8,6 +9,7 @@ import type { Telemetry } from '../core/telemetry.js';
 
 export function createApiRouter(
   skills: SkillRegistry,
+  skillCache: SkillCache,
   skillInjector: SkillInjector,
   mcpRegistry: McpRegistry,
   mcpInjector: McpInjector,
@@ -18,7 +20,7 @@ export function createApiRouter(
       const headers: Record<string, string> = {
         'Content-Type': 'application/json',
         'Access-Control-Allow-Origin': '*',
-        'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+        'Access-Control-Allow-Methods': 'GET, POST, DELETE, OPTIONS',
         'Access-Control-Allow-Headers': 'Content-Type',
       };
       res.writeHead(status, headers);
@@ -31,10 +33,49 @@ export function createApiRouter(
     const method = req.method || 'GET';
 
     try {
-      // GET /api/skills
+      // GET /api/skills — 获取已发现的技能
       if (method === 'GET' && url.pathname === '/api/skills') {
         const category = url.searchParams.get('category') || undefined;
         return sendJson(skills.getByCategory(category));
+      }
+
+      // GET /api/skills/cached — 获取已缓存的技能
+      if (method === 'GET' && url.pathname === '/api/skills/cached') {
+        return sendJson(skillCache.getAll());
+      }
+
+      // POST /api/skills/cache — 缓存选中的技能
+      if (method === 'POST' && url.pathname === '/api/skills/cache') {
+        const body = JSON.parse(await readBody(req));
+        const names: string[] = body.names || [];
+        const entries: CacheEntry[] = [];
+        for (const name of names) {
+          const skill = skills.get(name);
+          if (skill) {
+            entries.push({
+              name: skill.name,
+              category: skill.category,
+              description: skill.description,
+              cachedAt: new Date().toISOString(),
+            });
+          }
+        }
+        if (body.clear === true) {
+          await skillCache.clear();
+        }
+        await skillCache.setMany(entries);
+        return sendJson({ ok: true, count: entries.length });
+      }
+
+      // DELETE /api/skills/cache — 移除缓存的技能
+      if (method === 'DELETE' && url.pathname === '/api/skills/cache') {
+        const name = url.searchParams.get('name');
+        if (name) {
+          await skillCache.remove(name);
+        } else {
+          await skillCache.clear();
+        }
+        return sendJson({ ok: true });
       }
 
       // GET /api/mcp-servers
@@ -56,7 +97,7 @@ export function createApiRouter(
         return sendJson({ ok: true });
       }
 
-      // POST /api/inject/skill
+      // POST /api/inject/skill — 注入单个技能
       if (method === 'POST' && url.pathname === '/api/inject/skill') {
         const body = JSON.parse(await readBody(req));
         const skill = skills.get(body.skillName);
@@ -64,6 +105,25 @@ export function createApiRouter(
         const results = await skillInjector.inject(skill, body.targets || ['qoder'], body.scope || 'project');
         telemetry.record({ type: 'skill', name: body.skillName, category: skill.category, source: 'ui', trigger: 'manual_inject' });
         return sendJson({ results });
+      }
+
+      // POST /api/inject/skill/cached — 注入所有已缓存的技能
+      if (method === 'POST' && url.pathname === '/api/inject/skill/cached') {
+        const body = JSON.parse(await readBody(req));
+        const cached = skillCache.getAll();
+        const targets: IdeTarget[] = body.targets || ['qoder'];
+        const scope: InjectScope = body.scope || 'project';
+        const allResults: InjectResult[] = [];
+
+        for (const entry of cached) {
+          const skill = skills.get(entry.name);
+          if (!skill) continue;
+          const results = await skillInjector.inject(skill, targets, scope);
+          allResults.push(...results);
+          telemetry.record({ type: 'skill', name: entry.name, category: entry.category, source: 'ui', trigger: 'cache_inject' });
+        }
+
+        return sendJson({ results: allResults, count: cached.length });
       }
 
       // POST /api/inject/mcp
@@ -99,6 +159,7 @@ export function createApiRouter(
         return sendJson({
           status: 'ok',
           skills: skills.getAll().length,
+          cachedSkills: skillCache.getAll().length,
           mcpServers: mcpRegistry.getServers().length,
           mcpTools: mcpRegistry.getAllTools().length,
           events: telemetry.getRecent().length,

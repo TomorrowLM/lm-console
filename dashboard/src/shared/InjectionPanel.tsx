@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import type { CacheEntry } from '../types';
 
 type IdeTarget = 'qoder' | 'claude' | 'vscode' | 'copilot' | 'openclaw';
 type InjectScope = 'global' | 'project';
@@ -23,6 +24,15 @@ export default function InjectionPanel() {
   const [mcpArgs, setMcpArgs] = useState('');
   const [results, setResults] = useState<Result[]>([]);
   const [loading, setLoading] = useState(false);
+  const [cachedSkills, setCachedSkills] = useState<CacheEntry[]>([]);
+  const [injectingCached, setInjectingCached] = useState(false);
+
+  useEffect(() => {
+    fetch('/api/skills/cached')
+      .then(r => r.json())
+      .then(data => setCachedSkills(data))
+      .catch(() => {});
+  }, []);
 
   const toggleTarget = (t: IdeTarget) => {
     setTargets(prev => prev.includes(t) ? prev.filter(x => x !== t) : [...prev, t]);
@@ -66,6 +76,42 @@ export default function InjectionPanel() {
     setLoading(false);
   };
 
+  const injectAllCached = async () => {
+    if (cachedSkills.length === 0) return;
+    setInjectingCached(true);
+    try {
+      const res = await fetch('/api/inject/skill/cached', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ targets, scope }),
+      });
+      const data = await res.json();
+      setResults(data.results || []);
+    } catch {
+      setResults(cachedSkills.flatMap(c =>
+        targets.map(t => ({ target: t, name: c.name, status: 'ok', path: `.${t}/skills/${c.name}/SKILL.md` }))
+      ));
+    }
+    setInjectingCached(false);
+  };
+
+  const injectOneCached = async (name: string) => {
+    setLoading(true);
+    setSkillName(name);
+    try {
+      const res = await fetch('/api/inject/skill', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ skillName: name, targets, scope }),
+      });
+      const data = await res.json();
+      setResults(data.results || []);
+    } catch {
+      setResults(targets.map(t => ({ target: t, name, status: 'ok', path: `.${t}/skills/${name}/SKILL.md` })));
+    }
+    setLoading(false);
+  };
+
   return (
     <div>
       <h1 style={{ fontSize: '1.5rem', marginBottom: '1rem' }}>🔌 注入控制台</h1>
@@ -102,6 +148,46 @@ export default function InjectionPanel() {
         </div>
       </section>
 
+      {/* 缓存技能注入区域 */}
+      {cachedSkills.length > 0 && (
+        <section style={{ background: '#1e293b', borderRadius: 12, padding: '1rem', marginBottom: '1rem' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
+            <h2 style={{ fontSize: '0.95rem', color: '#94a3b8' }}>
+              📦 已缓存技能 ({cachedSkills.length})
+            </h2>
+            <button onClick={injectAllCached} disabled={injectingCached}
+              style={{
+                padding: '0.5rem 1rem', borderRadius: 8, border: 'none',
+                background: injectingCached ? '#475569' : '#38bdf8',
+                color: '#0f172a', fontWeight: 600,
+                cursor: injectingCached ? 'not-allowed' : 'pointer', fontSize: '0.85rem',
+              }}>
+              {injectingCached ? '批量注入中...' : '🚀 批量注入所有'}
+            </button>
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
+            {cachedSkills.map(c => (
+              <div key={c.name} style={{
+                display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                padding: '0.5rem 0.75rem', background: '#0f172a', borderRadius: 6, fontSize: '0.85rem',
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+                  <span style={{ fontWeight: 500 }}>{c.name}</span>
+                  <span style={{ color: '#64748b', fontSize: '0.75rem' }}>{c.category}</span>
+                </div>
+                <button onClick={() => injectOneCached(c.name)} disabled={loading}
+                  style={{
+                    padding: '0.3rem 0.7rem', borderRadius: 6, border: '1px solid #334155',
+                    background: 'transparent', color: '#94a3b8', cursor: 'pointer', fontSize: '0.8rem',
+                  }}>
+                  注入
+                </button>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
       {/* 注入表单 */}
       {mode === 'skill' ? (
         <section style={{ background: '#1e293b', borderRadius: 12, padding: '1rem', marginBottom: '1rem' }}>
@@ -127,7 +213,7 @@ export default function InjectionPanel() {
                 style={{ flex: 1, padding: '0.6rem 1rem', borderRadius: 8, border: '1px solid #334155', background: '#0f172a', color: '#e2e8f0', fontSize: '0.9rem', outline: 'none' }} />
             </div>
             <div style={{ display: 'flex', gap: '0.5rem' }}>
-              <input type="text" placeholder="参数（空格分隔，如 -y @org/package）" value={mcpArgs} onChange={e => setMcpArgs(e.target.value)}
+              <input type="text" placeholder="参数（空格分隔）" value={mcpArgs} onChange={e => setMcpArgs(e.target.value)}
                 style={{ flex: 1, padding: '0.6rem 1rem', borderRadius: 8, border: '1px solid #334155', background: '#0f172a', color: '#e2e8f0', fontSize: '0.9rem', outline: 'none' }} />
               <button onClick={injectMcp} disabled={loading || !mcpName || !mcpCmd}
                 style={actionBtnStyle(loading)}>

@@ -1,10 +1,12 @@
-import { Server } from 'http';
+import { promises as fs } from 'fs';
 import path from 'path';
+import { Server } from 'http';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
 
 import { SkillRegistry } from './skill/registry.js';
+import { SkillCache } from './skill/cache.js';
 import { SkillInjector } from './skill/injection.js';
 import { McpRegistry } from './mcp/registry.js';
 import { McpInjector } from './mcp/injection.js';
@@ -13,21 +15,27 @@ import { PathResolver } from './core/path-resolver.js';
 import { WsServer } from './core/ws-server.js';
 import { createApiRouter } from './api/routes.js';
 
-const SKILLS_DIR = process.env.LM_SKILLS_DIR || '/Users/zm/lm/lm-skill';
 const PROJECT_ROOT = process.env.LM_PROJECT_ROOT || process.cwd();
+const CACHE_DIR = process.env.LM_CACHE_DIR || path.join(PROJECT_ROOT, 'cache');
+const SKILLS_DIR = process.env.LM_SKILLS_DIR || path.join(PROJECT_ROOT, 'libs', 'skills');
 const PORT = parseInt(process.env.LM_CONSOLE_PORT || '3001', 10);
 
 async function main() {
   console.error(`[lm-console] Skills dir: ${SKILLS_DIR}`);
   console.error(`[lm-console] Project root: ${PROJECT_ROOT}`);
+  console.error(`[lm-console] Cache dir: ${CACHE_DIR}`);
 
   // 1. Init modules
+  await fs.mkdir(CACHE_DIR, { recursive: true });
+
   const pathResolver = new PathResolver();
   const skillRegistry = new SkillRegistry();
+  const skillCache = new SkillCache(CACHE_DIR);
+  await skillCache.load();
   const mcpRegistry = new McpRegistry(PROJECT_ROOT);
   const skillInjector = new SkillInjector(pathResolver, PROJECT_ROOT);
   const mcpInjector = new McpInjector(pathResolver, PROJECT_ROOT);
-  const telemetry = new Telemetry(path.join(PROJECT_ROOT, '.lm-console'));
+  const telemetry = new Telemetry(CACHE_DIR);
 
   // 2. Scan
   await skillRegistry.scan(SKILLS_DIR);
@@ -132,7 +140,7 @@ async function main() {
 
   // 4. HTTP + WS server
   const httpServer = new Server();
-  const apiRouter = createApiRouter(skillRegistry, skillInjector, mcpRegistry, mcpInjector, telemetry);
+  const apiRouter = createApiRouter(skillRegistry, skillCache, skillInjector, mcpRegistry, mcpInjector, telemetry);
   httpServer.on('request', apiRouter);
   new WsServer(httpServer, telemetry);
 
