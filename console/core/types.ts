@@ -1,5 +1,5 @@
 export type HitType = 'skill' | 'mcp' | 'agent';
-export type IdeTarget = 'qoder' | 'claude' | 'vscode' | 'copilot' | 'openclaw';
+export type IdeTarget = 'qoder' | 'claude' | 'vscode' | 'copilot' | 'openclaw' | 'trae';
 export type InjectScope = 'global' | 'project';
 
 export interface HitEvent {

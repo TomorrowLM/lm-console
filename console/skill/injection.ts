@@ -19,9 +19,12 @@ export class SkillInjector {
   private async injectOne(skill: SkillMeta, content: string, target: IdeTarget, scope: InjectScope, projectRoot: string): Promise<InjectResult> {
     const targetPath = this.resolver.skillFilePath(target, scope, projectRoot, skill.name);
     try {
+      console.error(`[SkillInjector] 注入 ${skill.name} 到 ${target} (${scope}) at ${targetPath}`);
       await this.writeToTarget(skill, content, target, scope, projectRoot);
+      console.error(`[SkillInjector] 成功注入 ${skill.name} 到 ${target}`);
       return { target, type: 'skill', name: skill.name, status: 'ok', targetPath };
     } catch (e: any) {
+      console.error(`[SkillInjector] 注入 ${skill.name} 到 ${target} 失败:`, e);
       return { target, type: 'skill', name: skill.name, status: 'error', targetPath, error: e.message };
     }
   }
@@ -30,6 +33,9 @@ export class SkillInjector {
     switch (target) {
       case 'qoder':
         await this.writeQoder(skill, content, scope, projectRoot);
+        break;
+      case 'trae':
+        await this.writeTrae(skill, content, scope, projectRoot);
         break;
       case 'claude':
       case 'openclaw':
@@ -83,5 +89,22 @@ export class SkillInjector {
       '',
     ].join('\n');
     await fs.appendFile(filePath, block, 'utf-8');
+  }
+
+  private async writeTrae(skill: SkillMeta, content: string, scope: InjectScope, projectRoot: string): Promise<void> {
+    const dir = this.resolver.skillDir('trae', scope, projectRoot);
+    const skillDir = path.join(dir, skill.name);
+    await fs.mkdir(skillDir, { recursive: true });
+    await fs.writeFile(path.join(skillDir, 'SKILL.md'), content, 'utf-8');
+
+    if (scope === 'project') {
+      const cmdDir = path.join(projectRoot, '.trae', 'commands', skill.name);
+      await fs.mkdir(cmdDir, { recursive: true });
+      await fs.writeFile(
+        path.join(cmdDir, 'config.json'),
+        JSON.stringify({ command: skill.name, description: skill.description, skill: skill.name }, null, 2),
+        'utf-8',
+      );
+    }
   }
 }

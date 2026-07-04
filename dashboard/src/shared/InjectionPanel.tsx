@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import type { CacheEntry, SkillMeta } from '../types';
+import type { SkillMeta } from '../types';
 
-type IdeTarget = 'qoder' | 'claude' | 'vscode' | 'copilot' | 'openclaw';
+type IdeTarget = 'qoder' | 'claude' | 'vscode' | 'copilot' | 'openclaw' | 'trae';
 type InjectScope = 'global' | 'project';
 
 interface McpPreset {
@@ -40,14 +40,15 @@ const IDE_LIST: { key: IdeTarget; label: string; color: string }[] = [
   { key: 'vscode', label: 'VSCode', color: '#60a5fa' },
   { key: 'copilot', label: 'GitHub Copilot', color: '#34d399' },
   { key: 'openclaw', label: 'OpenClaw', color: '#fb923c' },
+  { key: 'trae', label: 'Trae IDE', color: '#f43f5e' },
 ];
 
-interface Result { target: string; name: string; status: string; path: string; error?: string }
+interface Result { target: string; name: string; status: string; targetPath?: string; path?: string; error?: string }
 
 export default function InjectionPanel() {
   const [mode, setMode] = useState<'skill' | 'mcp'>('skill');
   const [scope, setScope] = useState<InjectScope>('project');
-  const [targets, setTargets] = useState<IdeTarget[]>(['qoder', 'claude']);
+  const [targets, setTargets] = useState<IdeTarget[]>([]);
   const [mcpName, setMcpName] = useState('');
   const [mcpCmd, setMcpCmd] = useState('');
   const [mcpArgs, setMcpArgs] = useState('');
@@ -57,8 +58,7 @@ export default function InjectionPanel() {
   const [loading, setLoading] = useState(false);
   const [projectRoot, setProjectRoot] = useState('');
   const [allSkills, setAllSkills] = useState<SkillMeta[]>([]);
-  const [cachedSkills, setCachedSkills] = useState<CacheEntry[]>([]);
-  const [injectingCached, setInjectingCached] = useState(false);
+  const [injectingAll, setInjectingAll] = useState(false);
   const [toasts, setToasts] = useState<{ id: number; type: 'ok' | 'err'; msg: string }[]>([]);
   let toastId = 0;
 
@@ -73,31 +73,27 @@ export default function InjectionPanel() {
       .then(r => r.json())
       .then(data => setAllSkills(data))
       .catch(() => {});
-    fetch('/api/skills/cached')
-      .then(r => r.json())
-      .then(data => setCachedSkills(data))
-      .catch(() => {});
   }, []);
 
   const canInject = scope === 'global' || projectRoot.trim() !== '';
 
-  const cacheAllSkills = async () => {
-    if (allSkills.length === 0) return;
+  const injectAllSkills = async () => {
+    if (allSkills.length === 0 || !canInject) return;
+    setInjectingAll(true);
     try {
-      const names = allSkills.map(s => s.name);
-      const res = await fetch('/api/skills/cache', {
+      const res = await fetch('/api/inject/skill/all', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ names, clear: true }),
+        body: JSON.stringify({ targets, scope, projectRoot }),
       });
       const data = await res.json();
-      setCachedSkills(allSkills.map(s => ({
-        name: s.name, category: s.category, description: s.description, cachedAt: new Date().toISOString(),
-      })));
-      showToast('ok', `已缓存 ${data.count || allSkills.length} 个技能`);
+      setResults(data.results || []);
+      const allOk = (data.results || []).every((r: Result) => r.status === 'ok');
+      showToast(allOk ? 'ok' : 'err', allOk ? `${data.count || allSkills.length} 个技能全部注入成功` : '部分技能注入失败');
     } catch {
-      showToast('err', '缓存技能失败');
+      showToast('err', '批量注入失败');
     }
+    setInjectingAll(false);
   };
 
   const injectAllMcp = async () => {
@@ -173,26 +169,7 @@ export default function InjectionPanel() {
     setLoading(false);
   };
 
-  const injectAllCached = async () => {
-    if (cachedSkills.length === 0 || !canInject) return;
-    setInjectingCached(true);
-    try {
-      const res = await fetch('/api/inject/skill/cached', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ targets, scope, projectRoot }),
-      });
-      const data = await res.json();
-      setResults(data.results || []);
-      const allOk = (data.results || []).every((r: Result) => r.status === 'ok');
-      showToast(allOk ? 'ok' : 'err', allOk ? `${data.count || cachedSkills.length} 个技能全部注入成功` : '部分技能注入失败');
-    } catch {
-      showToast('err', '批量注入失败');
-    }
-    setInjectingCached(false);
-  };
-
-  const injectOneCached = async (name: string) => {
+  const injectOneSkill = async (name: string) => {
     if (!canInject) return;
     setLoading(true);
     try {
@@ -283,46 +260,6 @@ export default function InjectionPanel() {
         </div>
       </section>
 
-      {/* 缓存技能注入区域 */}
-      {mode === 'skill' && cachedSkills.length > 0 && (
-        <section style={{ background: '#1e293b', borderRadius: 12, padding: '1rem', marginBottom: '1rem' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
-            <h2 style={{ fontSize: '0.95rem', color: '#94a3b8' }}>
-              📦 已缓存技能 ({cachedSkills.length})
-            </h2>
-            <button onClick={injectAllCached} disabled={injectingCached || !canInject}
-              style={{
-                padding: '0.5rem 1rem', borderRadius: 8, border: 'none',
-                background: injectingCached || !canInject ? '#475569' : '#38bdf8',
-                color: '#0f172a', fontWeight: 600,
-                cursor: injectingCached || !canInject ? 'not-allowed' : 'pointer', fontSize: '0.85rem',
-              }}>
-              {injectingCached ? '批量注入中...' : '🚀 批量注入所有'}
-            </button>
-          </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
-            {cachedSkills.map(c => (
-              <div key={c.name} style={{
-                display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                padding: '0.5rem 0.75rem', background: '#0f172a', borderRadius: 6, fontSize: '0.85rem',
-              }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
-                  <span style={{ fontWeight: 500 }}>{c.name}</span>
-                  <span style={{ color: '#64748b', fontSize: '0.75rem' }}>{c.category}</span>
-                </div>
-                <button onClick={() => injectOneCached(c.name)} disabled={loading || !canInject}
-                  style={{
-                    padding: '0.3rem 0.7rem', borderRadius: 6, border: '1px solid #334155',
-                    background: 'transparent', color: loading || !canInject ? '#475569' : '#94a3b8', cursor: loading || !canInject ? 'not-allowed' : 'pointer', fontSize: '0.8rem',
-                  }}>
-                  注入
-                </button>
-              </div>
-            ))}
-          </div>
-        </section>
-      )}
-
       {/* 技能列表注入区域 */}
       {mode === 'skill' && allSkills.length > 0 && (
         <section style={{ background: '#1e293b', borderRadius: 12, padding: '1rem', marginBottom: '1rem' }}>
@@ -330,13 +267,14 @@ export default function InjectionPanel() {
             <h2 style={{ fontSize: '0.95rem', color: '#94a3b8' }}>
               📋 全部技能 ({allSkills.length})
             </h2>
-            <button onClick={cacheAllSkills}
+            <button onClick={injectAllSkills} disabled={injectingAll || !canInject}
               style={{
-                padding: '0.5rem 1rem', borderRadius: 8, border: '1px solid #38bdf8',
-                background: 'transparent', color: '#38bdf8', fontWeight: 600,
-                cursor: 'pointer', fontSize: '0.85rem',
+                padding: '0.5rem 1rem', borderRadius: 8, border: 'none',
+                background: injectingAll || !canInject ? '#475569' : '#38bdf8',
+                color: '#0f172a', fontWeight: 600,
+                cursor: injectingAll || !canInject ? 'not-allowed' : 'pointer', fontSize: '0.85rem',
               }}>
-              📋 缓存全部
+              {injectingAll ? '批量注入中...' : '🚀 批量注入所有'}
             </button>
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem', maxHeight: 400, overflowY: 'auto' }}>
@@ -350,7 +288,7 @@ export default function InjectionPanel() {
                   <span style={{ color: '#64748b', fontSize: '0.75rem' }}>{s.category}</span>
                   <span style={{ color: '#475569', fontSize: '0.75rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.description}</span>
                 </div>
-                <button onClick={() => injectOneCached(s.name)} disabled={loading || !canInject}
+                <button onClick={() => injectOneSkill(s.name)} disabled={loading || !canInject}
                   style={{
                     padding: '0.3rem 0.7rem', borderRadius: 6, border: '1px solid #334155',
                     background: 'transparent', color: loading || !canInject ? '#475569' : '#94a3b8', cursor: loading || !canInject ? 'not-allowed' : 'pointer', fontSize: '0.8rem',
@@ -455,7 +393,7 @@ export default function InjectionPanel() {
                   {r.target}
                 </Tag>
                 <span style={{ color: '#64748b', fontSize: '0.8rem', marginLeft: 'auto', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                  {r.path || r.error}
+                  {r.targetPath || r.path || r.error}
                 </span>
               </div>
             ))}

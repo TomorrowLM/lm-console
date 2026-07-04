@@ -14,6 +14,7 @@ export class PathResolver {
         vscode: path.join(projectRoot, '.vscode', 'globalStorage', 'lm-console', 'skills'),
         copilot: path.join(projectRoot, '.github'),
         openclaw: path.join(projectRoot, '.openclaw', 'skills'),
+        trae: path.join(projectRoot, '.trae', 'skills'),
       };
       return map[target];
     }
@@ -36,6 +37,7 @@ export class PathResolver {
         vscode: path.join(projectRoot, '.vscode', 'mcp.json'),
         copilot: '',
         openclaw: '',
+        trae: path.join(projectRoot, '.trae', 'mcp.json'),
       };
       return map[target];
     }
@@ -54,6 +56,9 @@ export class PathResolver {
         return this.isWin
           ? path.join(this.home, 'AppData', 'Roaming', 'Code', 'User', 'globalStorage', 'lm-console', 'skills')
           : path.join(this.home, 'Library', 'Application Support', 'Code', 'User', 'globalStorage', 'lm-console', 'skills');
+      case 'trae':
+        // Trae IDE 的全局技能存放在 ~/.trae/skills/
+        return path.join(this.home, '.trae', 'skills');
       default:
         return '';
     }
@@ -73,6 +78,9 @@ export class PathResolver {
           return path.join(process.env.APPDATA || path.join(this.home, 'AppData', 'Roaming'), 'Qoder', 'SharedClientCache', 'mcp.json');
         }
         return path.join(this.home, '.config', 'Qoder', 'SharedClientCache', 'mcp.json');
+      case 'trae':
+        // Trae IDE 的全局 MCP 配置存放在 ~/.trae/mcps/ 文件夹下
+        return path.join(this.home, '.trae', 'mcps.json');
       default:
         return '';
     }

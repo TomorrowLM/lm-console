@@ -139,25 +139,23 @@ export function createApiRouter(
         return sendJson({ results });
       }
 
-      // POST /api/inject/skill/cached — 注入所有已缓存的技能
-      if (method === 'POST' && url.pathname === '/api/inject/skill/cached') {
+      // POST /api/inject/skill/all — 注入所有技能
+      if (method === 'POST' && url.pathname === '/api/inject/skill/all') {
         const body = JSON.parse(await readBody(req));
-        const cached = skillCache.getAll();
+        const allSkills = skills.getAll();
         const targets: IdeTarget[] = body.targets || ['qoder'];
         const scope: InjectScope = body.scope || 'project';
         if (scope === 'project' && !body.projectRoot) return sendJson({ error: '项目级注入必须指定 projectRoot' }, 400);
         const projectRoot = scope === 'project' ? body.projectRoot : undefined;
         const allResults: InjectResult[] = [];
 
-        for (const entry of cached) {
-          const skill = skills.get(entry.name);
-          if (!skill) continue;
+        for (const skill of allSkills) {
           const results = await skillInjector.inject(skill, targets, scope, projectRoot);
           allResults.push(...results);
-          telemetry.record({ type: 'skill', name: entry.name, category: entry.category, source: 'ui', trigger: 'cache_inject' });
+          telemetry.record({ type: 'skill', name: skill.name, category: skill.category, source: 'ui', trigger: 'all_inject' });
         }
 
-        return sendJson({ results: allResults, count: cached.length });
+        return sendJson({ results: allResults, count: allSkills.length });
       }
 
       // POST /api/inject/mcp

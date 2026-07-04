@@ -3,17 +3,15 @@ import type { HitEvent, HitStats } from './types';
 import Dashboard from './shared/Dashboard';
 import SkillList from './skill/SkillList';
 import McpToolList from './mcp/McpToolList';
-import HitRateChart from './shared/HitRateChart';
 import InjectionPanel from './shared/InjectionPanel';
 import LiveMonitor from './shared/LiveMonitor';
 
-type Tab = 'dashboard' | 'skills' | 'mcp' | 'chart' | 'inject' | 'monitor';
+type Tab = 'dashboard' | 'skills' | 'mcp' | 'inject' | 'monitor';
 
 const TABS: { key: Tab; label: string; icon: string }[] = [
   { key: 'dashboard', label: '总览', icon: '📊' },
   { key: 'skills', label: '技能', icon: '📋' },
   { key: 'mcp', label: 'MCP', icon: '🛠️' },
-  { key: 'chart', label: '图表', icon: '📈' },
   { key: 'inject', label: '注入', icon: '🔌' },
   { key: 'monitor', label: '实时', icon: '⚡' },
 ];
@@ -26,8 +24,8 @@ export default function App() {
 
   useEffect(() => {
     const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const host = location.hostname || 'localhost';
-    const wsUrl = `${protocol}//${host}:3001/ws`;
+    const host = location.host; // 包含端口
+    const wsUrl = `${protocol}//${host}/ws`; // 通过 Vite 代理
     let ws: WebSocket;
     let timer: number;
 
@@ -87,7 +85,6 @@ export default function App() {
         {activeTab === 'dashboard' && <Dashboard stats={stats} recent={recent} />}
         {activeTab === 'skills' && <SkillList />}
         {activeTab === 'mcp' && <McpToolList />}
-        {activeTab === 'chart' && <HitRateChart stats={stats} />}
         {activeTab === 'inject' && <InjectionPanel />}
         {activeTab === 'monitor' && <LiveMonitor recent={recent} connected={connected} />}
       </main>
