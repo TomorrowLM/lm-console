@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "lm-mcp-server": {
+      "command": "node",
+      "args": [
+        "libs/mcps/front-mcp/dist/index.js"
+      ],
+      "type": "stdio"
+    }
+  }
+}

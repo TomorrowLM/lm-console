@@ -64,7 +64,15 @@ export class PathResolver {
       case 'claude':
         return path.join(this.home, '.claude', 'mcp.json');
       case 'qoder':
-        return path.join(this.home, '.qoder', 'mcp.json');
+        // Qoder 在 macOS 上的实际 MCP 配置路径
+        if (os.platform() === 'darwin') {
+          return path.join(this.home, 'Library', 'Application Support', 'Qoder', 'SharedClientCache', 'mcp.json');
+        }
+        // Windows / Linux fallback
+        if (os.platform() === 'win32') {
+          return path.join(process.env.APPDATA || path.join(this.home, 'AppData', 'Roaming'), 'Qoder', 'SharedClientCache', 'mcp.json');
+        }
+        return path.join(this.home, '.config', 'Qoder', 'SharedClientCache', 'mcp.json');
       default:
         return '';
     }

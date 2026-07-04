@@ -59,6 +59,14 @@ export default function InjectionPanel() {
   const [allSkills, setAllSkills] = useState<SkillMeta[]>([]);
   const [cachedSkills, setCachedSkills] = useState<CacheEntry[]>([]);
   const [injectingCached, setInjectingCached] = useState(false);
+  const [toasts, setToasts] = useState<{ id: number; type: 'ok' | 'err'; msg: string }[]>([]);
+  let toastId = 0;
+
+  const showToast = (type: 'ok' | 'err', msg: string) => {
+    const id = ++toastId;
+    setToasts(prev => [...prev, { id, type, msg }]);
+    setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), 3000);
+  };
 
   useEffect(() => {
     fetch('/api/skills')
@@ -72,6 +80,52 @@ export default function InjectionPanel() {
   }, []);
 
   const canInject = scope === 'global' || projectRoot.trim() !== '';
+
+  const cacheAllSkills = async () => {
+    if (allSkills.length === 0) return;
+    try {
+      const names = allSkills.map(s => s.name);
+      const res = await fetch('/api/skills/cache', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ names, clear: true }),
+      });
+      const data = await res.json();
+      setCachedSkills(allSkills.map(s => ({
+        name: s.name, category: s.category, description: s.description, cachedAt: new Date().toISOString(),
+      })));
+      showToast('ok', `已缓存 ${data.count || allSkills.length} 个技能`);
+    } catch {
+      showToast('err', '缓存技能失败');
+    }
+  };
+
+  const injectAllMcp = async () => {
+    if (!canInject || MCP_PRESETS.length === 0) return;
+    setLoading(true);
+    let ok = 0, fail = 0;
+    for (const p of MCP_PRESETS) {
+      try {
+        const args = p.needsApiKey
+          ? p.args.replace(p.needsApiKey.argKey, figmaApiKey || '').split(' ').filter(Boolean)
+          : p.args.split(' ').filter(Boolean);
+        const res = await fetch('/api/inject/mcp', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ serverName: p.serverName, command: p.command, args, targets, scope, projectRoot }),
+        });
+        const data = await res.json();
+        const allOk = (data.results || []).every((r: Result) => r.status === 'ok');
+        if (allOk) ok++; else fail++;
+        setResults(prev => [...prev, ...(data.results || [])]);
+      } catch {
+        fail++;
+      }
+    }
+    setLoading(false);
+    if (fail === 0) showToast('ok', `${ok} 个 MCP 全部注入成功`);
+    else showToast('err', `${ok} 成功, ${fail} 失败`);
+  };
 
   const pickFolder = async () => {
     try {
@@ -111,8 +165,10 @@ export default function InjectionPanel() {
       });
       const data = await res.json();
       setResults(data.results || []);
+      const allOk = (data.results || []).every((r: Result) => r.status === 'ok');
+      showToast(allOk ? 'ok' : 'err', allOk ? `${mcpName} 注入成功` : `${mcpName} 部分失败`);
     } catch {
-      setResults(targets.map(t => ({ target: t, name: mcpName, status: 'ok', path: `.${t}/mcp.json` })));
+      showToast('err', `${mcpName} 注入失败`);
     }
     setLoading(false);
   };
@@ -128,10 +184,10 @@ export default function InjectionPanel() {
       });
       const data = await res.json();
       setResults(data.results || []);
+      const allOk = (data.results || []).every((r: Result) => r.status === 'ok');
+      showToast(allOk ? 'ok' : 'err', allOk ? `${data.count || cachedSkills.length} 个技能全部注入成功` : '部分技能注入失败');
     } catch {
-      setResults(cachedSkills.flatMap(c =>
-        targets.map(t => ({ target: t, name: c.name, status: 'ok', path: `.${t}/skills/${c.name}/SKILL.md` }))
-      ));
+      showToast('err', '批量注入失败');
     }
     setInjectingCached(false);
   };
@@ -147,14 +203,32 @@ export default function InjectionPanel() {
       });
       const data = await res.json();
       setResults(data.results || []);
+      const allOk = (data.results || []).every((r: Result) => r.status === 'ok');
+      showToast(allOk ? 'ok' : 'err', allOk ? `${name} 注入成功` : `${name} 注入失败`);
     } catch {
-      setResults(targets.map(t => ({ target: t, name, status: 'ok', path: `.${t}/skills/${name}/SKILL.md` })));
+      showToast('err', `${name} 注入失败`);
     }
     setLoading(false);
   };
 
   return (
     <div>
+      {/* Toast 通知 */}
+      <div style={{ position: 'fixed', top: 16, right: 16, zIndex: 2000, display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+        {toasts.map(t => (
+          <div key={t.id} style={{
+            padding: '0.6rem 1rem', borderRadius: 8, fontSize: '0.85rem', fontWeight: 500,
+            background: t.type === 'ok' ? '#065f46' : '#7f1d1d',
+            color: t.type === 'ok' ? '#6ee7b7' : '#fca5a5',
+            boxShadow: '0 4px 12px rgba(0,0,0,0.4)',
+            animation: 'fadeIn 0.2s ease-out',
+            maxWidth: 360,
+          }}>
+            {t.type === 'ok' ? '✅' : '❌'} {t.msg}
+          </div>
+        ))}
+      </div>
+
       <h1 style={{ fontSize: '1.5rem', marginBottom: '1rem' }}>🔌 注入控制台</h1>
 
       {/* 模式选择 */}
@@ -252,9 +326,19 @@ export default function InjectionPanel() {
       {/* 技能列表注入区域 */}
       {mode === 'skill' && allSkills.length > 0 && (
         <section style={{ background: '#1e293b', borderRadius: 12, padding: '1rem', marginBottom: '1rem' }}>
-          <h2 style={{ fontSize: '0.95rem', marginBottom: '0.75rem', color: '#94a3b8' }}>
-            📋 全部技能 ({allSkills.length})
-          </h2>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
+            <h2 style={{ fontSize: '0.95rem', color: '#94a3b8' }}>
+              📋 全部技能 ({allSkills.length})
+            </h2>
+            <button onClick={cacheAllSkills}
+              style={{
+                padding: '0.5rem 1rem', borderRadius: 8, border: '1px solid #38bdf8',
+                background: 'transparent', color: '#38bdf8', fontWeight: 600,
+                cursor: 'pointer', fontSize: '0.85rem',
+              }}>
+              📋 缓存全部
+            </button>
+          </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem', maxHeight: 400, overflowY: 'auto' }}>
             {allSkills.map(s => (
               <div key={s.name} style={{
@@ -285,7 +369,18 @@ export default function InjectionPanel() {
         <>
           {/* MCP 预设 */}
           <section style={{ background: '#1e293b', borderRadius: 12, padding: '1rem', marginBottom: '1rem' }}>
-            <h2 style={{ fontSize: '0.95rem', marginBottom: '0.75rem', color: '#94a3b8' }}>📦 可选 MCP 来源</h2>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
+              <h2 style={{ fontSize: '0.95rem', color: '#94a3b8', margin: 0 }}>📦 可选 MCP 来源</h2>
+              <button onClick={injectAllMcp} disabled={loading || !canInject}
+                style={{
+                  padding: '0.5rem 1rem', borderRadius: 8, border: 'none',
+                  background: loading || !canInject ? '#475569' : '#38bdf8',
+                  color: '#0f172a', fontWeight: 600,
+                  cursor: loading || !canInject ? 'not-allowed' : 'pointer', fontSize: '0.85rem',
+                }}>
+                {loading ? '注入中...' : '🚀 全部注入'}
+              </button>
+            </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
               {MCP_PRESETS.map(p => (
                 <div key={p.key}
