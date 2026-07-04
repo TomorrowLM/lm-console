@@ -1,8 +1,38 @@
 import React, { useState, useEffect } from 'react';
-import type { CacheEntry } from '../types';
+import type { CacheEntry, SkillMeta } from '../types';
 
 type IdeTarget = 'qoder' | 'claude' | 'vscode' | 'copilot' | 'openclaw';
 type InjectScope = 'global' | 'project';
+
+interface McpPreset {
+  key: string;
+  label: string;
+  description: string;
+  serverName: string;
+  command: string;
+  args: string;
+  needsApiKey?: { label: string; placeholder: string; argKey: string };
+}
+
+const MCP_PRESETS: McpPreset[] = [
+  {
+    key: 'front-mcp',
+    label: '🧪 front-mcp',
+    description: '自研 LM MCP 服务器（Swagger 解析 / API 生成 / UI 生成）',
+    serverName: 'lm-mcp-server',
+    command: 'node',
+    args: 'libs/mcps/front-mcp/dist/index.js',
+  },
+  {
+    key: 'figma',
+    label: '🎨 Framelink MCP for Figma',
+    description: 'Figma 设计稿数据获取',
+    serverName: 'Framelink MCP for Figma',
+    command: 'npx',
+    args: '-y figma-developer-mcp --figma-api-key={{FIGMA_API_KEY}} --stdio',
+    needsApiKey: { label: 'Figma API Key', placeholder: 'figd_...', argKey: '{{FIGMA_API_KEY}}' },
+  },
+];
 
 const IDE_LIST: { key: IdeTarget; label: string; color: string }[] = [
   { key: 'qoder', label: 'Qoder', color: '#38bdf8' },
@@ -18,45 +48,56 @@ export default function InjectionPanel() {
   const [mode, setMode] = useState<'skill' | 'mcp'>('skill');
   const [scope, setScope] = useState<InjectScope>('project');
   const [targets, setTargets] = useState<IdeTarget[]>(['qoder', 'claude']);
-  const [skillName, setSkillName] = useState('');
   const [mcpName, setMcpName] = useState('');
   const [mcpCmd, setMcpCmd] = useState('');
   const [mcpArgs, setMcpArgs] = useState('');
+  const [selectedPreset, setSelectedPreset] = useState<string | null>(null);
+  const [figmaApiKey, setFigmaApiKey] = useState('');
   const [results, setResults] = useState<Result[]>([]);
   const [loading, setLoading] = useState(false);
+  const [projectRoot, setProjectRoot] = useState('');
+  const [allSkills, setAllSkills] = useState<SkillMeta[]>([]);
   const [cachedSkills, setCachedSkills] = useState<CacheEntry[]>([]);
   const [injectingCached, setInjectingCached] = useState(false);
 
   useEffect(() => {
+    fetch('/api/skills')
+      .then(r => r.json())
+      .then(data => setAllSkills(data))
+      .catch(() => {});
     fetch('/api/skills/cached')
       .then(r => r.json())
       .then(data => setCachedSkills(data))
       .catch(() => {});
   }, []);
 
+  const canInject = scope === 'global' || projectRoot.trim() !== '';
+
+  const pickFolder = async () => {
+    try {
+      const res = await fetch('/api/pick-folder', { method: 'POST' });
+      const data = await res.json();
+      if (data.path) setProjectRoot(data.path);
+    } catch { /* ignore */ }
+  };
+
   const toggleTarget = (t: IdeTarget) => {
     setTargets(prev => prev.includes(t) ? prev.filter(x => x !== t) : [...prev, t]);
   };
 
-  const injectSkill = async () => {
-    if (!skillName) return;
-    setLoading(true);
-    try {
-      const res = await fetch('/api/inject/skill', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ skillName, targets, scope }),
-      });
-      const data = await res.json();
-      setResults(data.results || []);
-    } catch {
-      setResults(targets.map(t => ({ target: t, name: skillName, status: 'ok', path: `.${t}/skills/${skillName}/SKILL.md` })));
+  const selectPreset = (preset: McpPreset) => {
+    setSelectedPreset(preset.key);
+    setMcpName(preset.serverName);
+    setMcpCmd(preset.command);
+    if (preset.needsApiKey) {
+      setMcpArgs(preset.args.replace(preset.needsApiKey.argKey, figmaApiKey || ''));
+    } else {
+      setMcpArgs(preset.args);
     }
-    setLoading(false);
   };
 
   const injectMcp = async () => {
-    if (!mcpName || !mcpCmd) return;
+    if (!mcpName || !mcpCmd || !canInject) return;
     setLoading(true);
     try {
       const res = await fetch('/api/inject/mcp', {
@@ -65,7 +106,7 @@ export default function InjectionPanel() {
         body: JSON.stringify({
           serverName: mcpName, command: mcpCmd,
           args: mcpArgs.split(' ').filter(Boolean),
-          targets, scope,
+          targets, scope, projectRoot,
         }),
       });
       const data = await res.json();
@@ -77,13 +118,13 @@ export default function InjectionPanel() {
   };
 
   const injectAllCached = async () => {
-    if (cachedSkills.length === 0) return;
+    if (cachedSkills.length === 0 || !canInject) return;
     setInjectingCached(true);
     try {
       const res = await fetch('/api/inject/skill/cached', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ targets, scope }),
+        body: JSON.stringify({ targets, scope, projectRoot }),
       });
       const data = await res.json();
       setResults(data.results || []);
@@ -96,13 +137,13 @@ export default function InjectionPanel() {
   };
 
   const injectOneCached = async (name: string) => {
+    if (!canInject) return;
     setLoading(true);
-    setSkillName(name);
     try {
       const res = await fetch('/api/inject/skill', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ skillName: name, targets, scope }),
+        body: JSON.stringify({ skillName: name, targets, scope, projectRoot }),
       });
       const data = await res.json();
       setResults(data.results || []);
@@ -127,9 +168,29 @@ export default function InjectionPanel() {
         <button onClick={() => setScope('project')} style={tabStyle(scope === 'project')}>📁 项目级</button>
         <button onClick={() => setScope('global')} style={tabStyle(scope === 'global')}>🌐 全局</button>
         <span style={{ color: '#64748b', fontSize: '0.85rem', marginLeft: '1rem', alignSelf: 'center' }}>
-          {scope === 'global' ? '对所有项目生效' : '仅当前项目'}
+          {scope === 'global' ? '对所有项目生效' : '注入到指定项目文件夹'}
         </span>
       </div>
+
+      {/* 项目路径选择（仅项目级） */}
+      {scope === 'project' && (
+        <section style={{ background: '#1e293b', borderRadius: 12, padding: '1rem', marginBottom: '1rem' }}>
+          <h2 style={{ fontSize: '0.95rem', marginBottom: '0.75rem', color: '#94a3b8' }}>📂 目标项目文件夹</h2>
+          <div style={{ display: 'flex', gap: '0.5rem' }}>
+            <input type="text" placeholder="如 /Users/zm/my-project" value={projectRoot}
+              onChange={e => setProjectRoot(e.target.value)}
+              style={{ flex: 1, padding: '0.6rem 1rem', borderRadius: 8, border: '1px solid #334155', background: '#0f172a', color: '#e2e8f0', fontSize: '0.9rem', outline: 'none', boxSizing: 'border-box' }} />
+            <button onClick={pickFolder}
+              style={{
+                padding: '0.6rem 1rem', borderRadius: 8, border: '1px solid #334155',
+                background: 'transparent', color: '#94a3b8', cursor: 'pointer', fontSize: '0.85rem',
+                whiteSpace: 'nowrap', flexShrink: 0,
+              }}>
+              📁 选择文件夹
+            </button>
+          </div>
+        </section>
+      )}
 
       {/* IDE 选择 */}
       <section style={{ background: '#1e293b', borderRadius: 12, padding: '1rem', marginBottom: '1rem' }}>
@@ -149,18 +210,18 @@ export default function InjectionPanel() {
       </section>
 
       {/* 缓存技能注入区域 */}
-      {cachedSkills.length > 0 && (
+      {mode === 'skill' && cachedSkills.length > 0 && (
         <section style={{ background: '#1e293b', borderRadius: 12, padding: '1rem', marginBottom: '1rem' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
             <h2 style={{ fontSize: '0.95rem', color: '#94a3b8' }}>
               📦 已缓存技能 ({cachedSkills.length})
             </h2>
-            <button onClick={injectAllCached} disabled={injectingCached}
+            <button onClick={injectAllCached} disabled={injectingCached || !canInject}
               style={{
                 padding: '0.5rem 1rem', borderRadius: 8, border: 'none',
-                background: injectingCached ? '#475569' : '#38bdf8',
+                background: injectingCached || !canInject ? '#475569' : '#38bdf8',
                 color: '#0f172a', fontWeight: 600,
-                cursor: injectingCached ? 'not-allowed' : 'pointer', fontSize: '0.85rem',
+                cursor: injectingCached || !canInject ? 'not-allowed' : 'pointer', fontSize: '0.85rem',
               }}>
               {injectingCached ? '批量注入中...' : '🚀 批量注入所有'}
             </button>
@@ -175,10 +236,41 @@ export default function InjectionPanel() {
                   <span style={{ fontWeight: 500 }}>{c.name}</span>
                   <span style={{ color: '#64748b', fontSize: '0.75rem' }}>{c.category}</span>
                 </div>
-                <button onClick={() => injectOneCached(c.name)} disabled={loading}
+                <button onClick={() => injectOneCached(c.name)} disabled={loading || !canInject}
                   style={{
                     padding: '0.3rem 0.7rem', borderRadius: 6, border: '1px solid #334155',
-                    background: 'transparent', color: '#94a3b8', cursor: 'pointer', fontSize: '0.8rem',
+                    background: 'transparent', color: loading || !canInject ? '#475569' : '#94a3b8', cursor: loading || !canInject ? 'not-allowed' : 'pointer', fontSize: '0.8rem',
+                  }}>
+                  注入
+                </button>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {/* 技能列表注入区域 */}
+      {mode === 'skill' && allSkills.length > 0 && (
+        <section style={{ background: '#1e293b', borderRadius: 12, padding: '1rem', marginBottom: '1rem' }}>
+          <h2 style={{ fontSize: '0.95rem', marginBottom: '0.75rem', color: '#94a3b8' }}>
+            📋 全部技能 ({allSkills.length})
+          </h2>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem', maxHeight: 400, overflowY: 'auto' }}>
+            {allSkills.map(s => (
+              <div key={s.name} style={{
+                display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                padding: '0.5rem 0.75rem', background: '#0f172a', borderRadius: 6, fontSize: '0.85rem',
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', flex: 1, minWidth: 0 }}>
+                  <span style={{ fontWeight: 500, whiteSpace: 'nowrap' }}>{s.name}</span>
+                  <span style={{ color: '#64748b', fontSize: '0.75rem' }}>{s.category}</span>
+                  <span style={{ color: '#475569', fontSize: '0.75rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.description}</span>
+                </div>
+                <button onClick={() => injectOneCached(s.name)} disabled={loading || !canInject}
+                  style={{
+                    padding: '0.3rem 0.7rem', borderRadius: 6, border: '1px solid #334155',
+                    background: 'transparent', color: loading || !canInject ? '#475569' : '#94a3b8', cursor: loading || !canInject ? 'not-allowed' : 'pointer', fontSize: '0.8rem',
+                    flexShrink: 0, marginLeft: '0.5rem',
                   }}>
                   注入
                 </button>
@@ -189,22 +281,38 @@ export default function InjectionPanel() {
       )}
 
       {/* 注入表单 */}
-      {mode === 'skill' ? (
-        <section style={{ background: '#1e293b', borderRadius: 12, padding: '1rem', marginBottom: '1rem' }}>
-          <h2 style={{ fontSize: '0.95rem', marginBottom: '0.75rem', color: '#94a3b8' }}>技能名称</h2>
-          <div style={{ display: 'flex', gap: '0.5rem' }}>
-            <input type="text" placeholder="如 gitnexus-exploring" value={skillName}
-              onChange={e => setSkillName(e.target.value)}
-              style={{ flex: 1, padding: '0.6rem 1rem', borderRadius: 8, border: '1px solid #334155', background: '#0f172a', color: '#e2e8f0', fontSize: '0.9rem', outline: 'none' }} />
-            <button onClick={injectSkill} disabled={loading || !skillName}
-              style={actionBtnStyle(loading)}>
-              {loading ? '注入中...' : '🚀 注入技能'}
-            </button>
-          </div>
-        </section>
-      ) : (
-        <section style={{ background: '#1e293b', borderRadius: 12, padding: '1rem', marginBottom: '1rem' }}>
-          <h2 style={{ fontSize: '0.95rem', marginBottom: '0.75rem', color: '#94a3b8' }}>MCP 服务器配置</h2>
+      {mode === 'skill' ? null : (
+        <>
+          {/* MCP 预设 */}
+          <section style={{ background: '#1e293b', borderRadius: 12, padding: '1rem', marginBottom: '1rem' }}>
+            <h2 style={{ fontSize: '0.95rem', marginBottom: '0.75rem', color: '#94a3b8' }}>📦 可选 MCP 来源</h2>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+              {MCP_PRESETS.map(p => (
+                <div key={p.key}
+                  onClick={() => selectPreset(p)}
+                  style={{
+                    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                    padding: '0.65rem 0.85rem', borderRadius: 8,
+                    border: `2px solid ${selectedPreset === p.key ? '#38bdf8' : '#334155'}`,
+                    background: selectedPreset === p.key ? '#0f2740' : '#0f172a',
+                    cursor: 'pointer', fontSize: '0.85rem',
+                    transition: 'border-color 0.2s',
+                  }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', flex: 1, minWidth: 0 }}>
+                    <span style={{ fontWeight: 500 }}>{p.label}</span>
+                    <span style={{ color: '#64748b', fontSize: '0.75rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.description}</span>
+                  </div>
+                  <span style={{ color: selectedPreset === p.key ? '#38bdf8' : '#475569', marginLeft: '0.5rem', flexShrink: 0 }}>
+                    {selectedPreset === p.key ? '✓' : '○'}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </section>
+
+          {/* MCP 配置表单 */}
+          <section style={{ background: '#1e293b', borderRadius: 12, padding: '1rem', marginBottom: '1rem' }}>
+            <h2 style={{ fontSize: '0.95rem', marginBottom: '0.75rem', color: '#94a3b8' }}>🔧 MCP 服务器配置</h2>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
             <div style={{ display: 'flex', gap: '0.5rem' }}>
               <input type="text" placeholder="服务器名（如 my-server）" value={mcpName} onChange={e => setMcpName(e.target.value)}
@@ -215,13 +323,25 @@ export default function InjectionPanel() {
             <div style={{ display: 'flex', gap: '0.5rem' }}>
               <input type="text" placeholder="参数（空格分隔）" value={mcpArgs} onChange={e => setMcpArgs(e.target.value)}
                 style={{ flex: 1, padding: '0.6rem 1rem', borderRadius: 8, border: '1px solid #334155', background: '#0f172a', color: '#e2e8f0', fontSize: '0.9rem', outline: 'none' }} />
-              <button onClick={injectMcp} disabled={loading || !mcpName || !mcpCmd}
+              <button onClick={injectMcp} disabled={loading || !mcpName || !mcpCmd || !canInject}
                 style={actionBtnStyle(loading)}>
                 {loading ? '注入中...' : '🚀 注入 MCP'}
               </button>
             </div>
+            {/* Figma API Key 输入 */}
+            {selectedPreset === 'figma' && (
+              <div style={{ display: 'flex', gap: '0.5rem' }}>
+                <input type="text" placeholder="Figma API Key（figd_...）" value={figmaApiKey}
+                  onChange={e => {
+                    setFigmaApiKey(e.target.value);
+                    setMcpArgs(MCP_PRESETS.find(p => p.key === 'figma')!.args.replace('{{FIGMA_API_KEY}}', e.target.value));
+                  }}
+                  style={{ flex: 1, padding: '0.6rem 1rem', borderRadius: 8, border: '1px solid #f59e0b', background: '#0f172a', color: '#e2e8f0', fontSize: '0.9rem', outline: 'none' }} />
+              </div>
+            )}
           </div>
         </section>
+        </>
       )}
 
       {/* 结果 */}
@@ -247,6 +367,7 @@ export default function InjectionPanel() {
           </div>
         </section>
       )}
+
     </div>
   );
 }

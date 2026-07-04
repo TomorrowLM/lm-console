@@ -45,7 +45,7 @@ export class PathResolver {
   private globalSkillDir(target: IdeTarget): string {
     switch (target) {
       case 'qoder':
-        return path.join(this.home, '.config', 'qoder', 'skills');
+        return path.join(this.home, '.qoder', 'skills');
       case 'claude':
         return path.join(this.home, '.claude', 'skills');
       case 'openclaw':
@@ -64,7 +64,7 @@ export class PathResolver {
       case 'claude':
         return path.join(this.home, '.claude', 'mcp.json');
       case 'qoder':
-        return path.join(this.home, '.config', 'qoder', 'mcp.json');
+        return path.join(this.home, '.qoder', 'mcp.json');
       default:
         return '';
     }

@@ -58,10 +58,12 @@ async function main() {
     skillName: z.string(),
     targets: z.array(z.enum(['qoder', 'claude', 'vscode', 'copilot', 'openclaw'])),
     scope: z.enum(['global', 'project']).default('project'),
-  }, async ({ skillName, targets, scope }) => {
+    projectRoot: z.string().optional(),
+  }, async ({ skillName, targets, scope, projectRoot }) => {
+    if (scope === 'project' && !projectRoot) return { content: [{ type: 'text', text: '❌ 项目级注入必须指定 projectRoot' }], isError: true };
     const skill = skillRegistry.get(skillName);
     if (!skill) return { content: [{ type: 'text', text: `❌ 技能 ${skillName} 不存在` }], isError: true };
-    const results = await skillInjector.inject(skill, targets as any, scope as any);
+    const results = await skillInjector.inject(skill, targets as any, scope as any, projectRoot);
     telemetry.record({ type: 'skill', name: skillName, category: skill.category, source: 'mcp', trigger: 'inject' });
     return { content: [{ type: 'text', text: results.map(r =>
       `[${r.status === 'ok' ? '✓' : '✗'}] ${r.target}/${r.name} → ${r.targetPath}`
@@ -104,8 +106,10 @@ async function main() {
     serverName: z.string(), command: z.string(), args: z.array(z.string()),
     targets: z.array(z.enum(['qoder', 'claude', 'vscode'])),
     scope: z.enum(['global', 'project']).default('project'),
+    projectRoot: z.string().optional(),
   }, async (params) => {
-    const results = await mcpInjector.inject(params.serverName, params.command, params.args, params.targets as any, params.scope as any);
+    if (params.scope === 'project' && !params.projectRoot) return { content: [{ type: 'text', text: '❌ 项目级注入必须指定 projectRoot' }], isError: true };
+    const results = await mcpInjector.inject(params.serverName, params.command, params.args, params.targets as any, params.scope as any, params.projectRoot);
     telemetry.record({ type: 'mcp', name: params.serverName, category: 'mcp', source: 'mcp', trigger: 'inject_mcp' });
     return { content: [{ type: 'text', text: results.map(r =>
       `[${r.status === 'ok' ? '✓' : '✗'}] ${r.target}/${r.name} → ${r.targetPath}`

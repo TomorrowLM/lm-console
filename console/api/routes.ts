@@ -1,4 +1,7 @@
 import { IncomingMessage, ServerResponse } from 'http';
+import { promises as fs } from 'fs';
+import { execSync } from 'child_process';
+import path from 'path';
 import type { IdeTarget, InjectScope, InjectResult } from '../core/types.js';
 import type { SkillRegistry } from '../skill/registry.js';
 import type { SkillCache, CacheEntry } from '../skill/cache.js';
@@ -33,6 +36,32 @@ export function createApiRouter(
     const method = req.method || 'GET';
 
     try {
+      // POST /api/pick-folder — 打开原生文件夹选择器
+      if (method === 'POST' && url.pathname === '/api/pick-folder') {
+        try {
+          const result = execSync("osascript -e 'POSIX path of (choose folder)'", { encoding: 'utf-8', timeout: 60000 }).trim();
+          return sendJson({ path: result });
+        } catch {
+          return sendJson({ cancelled: true });
+        }
+      }
+
+      // GET /api/browse-dir — 浏览目录（用于文件夹选择器）
+      if (method === 'GET' && url.pathname === '/api/browse-dir') {
+        const dirPath = url.searchParams.get('path') || '/';
+        try {
+          const entries = await fs.readdir(dirPath, { withFileTypes: true });
+          const dirs = entries
+            .filter(e => e.isDirectory() && !e.name.startsWith('.'))
+            .map(e => e.name)
+            .sort((a, b) => a.localeCompare(b));
+          const parent = path.dirname(dirPath);
+          return sendJson({ path: dirPath, parent: parent !== dirPath ? parent : null, dirs });
+        } catch {
+          return sendJson({ error: '无法访问该目录' }, 400);
+        }
+      }
+
       // GET /api/skills — 获取已发现的技能
       if (method === 'GET' && url.pathname === '/api/skills') {
         const category = url.searchParams.get('category') || undefined;
@@ -100,9 +129,12 @@ export function createApiRouter(
       // POST /api/inject/skill — 注入单个技能
       if (method === 'POST' && url.pathname === '/api/inject/skill') {
         const body = JSON.parse(await readBody(req));
+        const scope: InjectScope = body.scope || 'project';
+        if (scope === 'project' && !body.projectRoot) return sendJson({ error: '项目级注入必须指定 projectRoot' }, 400);
         const skill = skills.get(body.skillName);
         if (!skill) return sendJson({ error: '技能不存在' }, 404);
-        const results = await skillInjector.inject(skill, body.targets || ['qoder'], body.scope || 'project');
+        const projectRoot = scope === 'project' ? body.projectRoot : undefined;
+        const results = await skillInjector.inject(skill, body.targets || ['qoder'], scope, projectRoot);
         telemetry.record({ type: 'skill', name: body.skillName, category: skill.category, source: 'ui', trigger: 'manual_inject' });
         return sendJson({ results });
       }
@@ -113,12 +145,14 @@ export function createApiRouter(
         const cached = skillCache.getAll();
         const targets: IdeTarget[] = body.targets || ['qoder'];
         const scope: InjectScope = body.scope || 'project';
+        if (scope === 'project' && !body.projectRoot) return sendJson({ error: '项目级注入必须指定 projectRoot' }, 400);
+        const projectRoot = scope === 'project' ? body.projectRoot : undefined;
         const allResults: InjectResult[] = [];
 
         for (const entry of cached) {
           const skill = skills.get(entry.name);
           if (!skill) continue;
-          const results = await skillInjector.inject(skill, targets, scope);
+          const results = await skillInjector.inject(skill, targets, scope, projectRoot);
           allResults.push(...results);
           telemetry.record({ type: 'skill', name: entry.name, category: entry.category, source: 'ui', trigger: 'cache_inject' });
         }
@@ -129,7 +163,10 @@ export function createApiRouter(
       // POST /api/inject/mcp
       if (method === 'POST' && url.pathname === '/api/inject/mcp') {
         const body = JSON.parse(await readBody(req));
-        const results = await mcpInjector.inject(body.serverName, body.command, body.args, body.targets || ['qoder'], body.scope || 'project');
+        const scope: InjectScope = body.scope || 'project';
+        if (scope === 'project' && !body.projectRoot) return sendJson({ error: '项目级注入必须指定 projectRoot' }, 400);
+        const projectRoot = scope === 'project' ? body.projectRoot : undefined;
+        const results = await mcpInjector.inject(body.serverName, body.command, body.args, body.targets || ['qoder'], scope, projectRoot);
         telemetry.record({ type: 'mcp', name: body.serverName, category: 'mcp', source: 'ui', trigger: 'manual_inject' });
         return sendJson({ results });
       }

@@ -11,16 +11,17 @@ export class McpInjector {
 
   async inject(
     serverName: string, command: string, args: string[],
-    targets: IdeTarget[], scope: InjectScope,
+    targets: IdeTarget[], scope: InjectScope, projectRoot?: string,
   ): Promise<InjectResult[]> {
-    return Promise.all(targets.map(t => this.injectOne(serverName, command, args, t, scope)));
+    const root = projectRoot || this.projectRoot;
+    return Promise.all(targets.map(t => this.injectOne(serverName, command, args, t, scope, root)));
   }
 
   private async injectOne(
     serverName: string, command: string, args: string[],
-    target: IdeTarget, scope: InjectScope,
+    target: IdeTarget, scope: InjectScope, projectRoot: string,
   ): Promise<InjectResult> {
-    const targetPath = this.resolver.mcpConfigPath(target, scope, this.projectRoot);
+    const targetPath = this.resolver.mcpConfigPath(target, scope, projectRoot);
     if (!targetPath) {
       return { target, type: 'mcp', name: serverName, status: 'skipped', targetPath: '', error: 'IDE 不支持 MCP 注入' };
     }

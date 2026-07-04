@@ -18,13 +18,17 @@ export interface McpServerMeta {
   tools: McpToolMeta[];
   lastProbed?: string;
   error?: string;
+  /** 本地 MCP 包路径（如果来自 libs/mcps） */
+  localPath?: string;
 }
 
 export class McpRegistry {
   private servers = new Map<string, McpServerMeta>();
   private configPaths: string[];
+  private projectRoot: string;
 
   constructor(projectRoot: string) {
+    this.projectRoot = projectRoot;
     this.configPaths = [
       path.join(projectRoot, '.vscode', 'mcp.json'),
       path.join(projectRoot, '.qoder', 'mcp.json'),
@@ -37,6 +41,8 @@ export class McpRegistry {
 
   async scan(): Promise<Map<string, McpServerMeta>> {
     this.servers.clear();
+
+    // 1. 扫描已知的 mcp.json 配置文件
     for (const configPath of this.configPaths) {
       try {
         const raw = await fs.readFile(configPath, 'utf-8');
@@ -56,6 +62,34 @@ export class McpRegistry {
         }
       } catch { /* skip */ }
     }
+
+    // 2. 扫描 libs/mcps 下的本地 MCP 包
+    const mcpsDir = path.join(this.projectRoot, 'libs', 'mcps');
+    try {
+      const entries = await fs.readdir(mcpsDir, { withFileTypes: true });
+      for (const entry of entries) {
+        if (!entry.isDirectory()) continue;
+        const pkgPath = path.join(mcpsDir, entry.name, 'package.json');
+        try {
+          const pkgRaw = await fs.readFile(pkgPath, 'utf-8');
+          const pkg = JSON.parse(pkgRaw);
+          const serverName = pkg.name || entry.name;
+          if (this.servers.has(serverName)) continue;
+          const distPath = path.join(mcpsDir, entry.name, 'dist', 'index.js');
+          const hasDist = await fs.stat(distPath).then(() => true).catch(() => false);
+          this.servers.set(serverName, {
+            name: serverName,
+            command: 'node',
+            args: [path.join('libs', 'mcps', entry.name, 'dist', 'index.js')],
+            type: 'stdio',
+            configPath: pkgPath,
+            tools: [],
+            localPath: path.join(mcpsDir, entry.name),
+          });
+        } catch { /* skip invalid package */ }
+      }
+    } catch { /* libs/mcps 不存在 */ }
+
     return this.servers;
   }
 
