@@ -1,4 +1,5 @@
 import { promises as fs } from 'fs';
+import os from 'os';
 import path from 'path';
 import { spawn } from 'child_process';
 
@@ -22,6 +23,28 @@ export interface McpServerMeta {
   localPath?: string;
 }
 
+function qoderGlobalMcpPath(): string {
+  const home = process.env.HOME || '';
+  if (os.platform() === 'darwin') {
+    return path.join(home, 'Library', 'Application Support', 'Qoder', 'SharedClientCache', 'mcp.json');
+  }
+  if (os.platform() === 'win32') {
+    return path.join(process.env.APPDATA || path.join(home, 'AppData', 'Roaming'), 'Qoder', 'SharedClientCache', 'mcp.json');
+  }
+  return path.join(home, '.config', 'Qoder', 'SharedClientCache', 'mcp.json');
+}
+
+function traeGlobalMcpPath(): string {
+  const home = process.env.HOME || '';
+  if (os.platform() === 'darwin') {
+    return path.join(home, 'Library', 'Application Support', 'Trae', 'User', 'mcp.json');
+  }
+  if (os.platform() === 'win32') {
+    return path.join(process.env.APPDATA || path.join(home, 'AppData', 'Roaming'), 'Trae', 'User', 'mcp.json');
+  }
+  return path.join(home, '.config', 'Trae', 'User', 'mcp.json');
+}
+
 export class McpRegistry {
   private servers = new Map<string, McpServerMeta>();
   private configPaths: string[];
@@ -33,9 +56,11 @@ export class McpRegistry {
       path.join(projectRoot, '.vscode', 'mcp.json'),
       path.join(projectRoot, '.qoder', 'mcp.json'),
       path.join(projectRoot, '.cursor', 'mcp.json'),
+      path.join(projectRoot, '.trae', 'mcp.json'),
       path.join(projectRoot, 'mcp.json'),
       path.join(process.env.HOME || '', '.claude', 'mcp.json'),
-      path.join(process.env.HOME || '', '.config', 'qoder', 'mcp.json'),
+      qoderGlobalMcpPath(),
+      traeGlobalMcpPath(),
     ];
   }
 
@@ -80,7 +105,7 @@ export class McpRegistry {
           this.servers.set(serverName, {
             name: serverName,
             command: 'node',
-            args: [path.join('libs', 'mcps', entry.name, 'dist', 'index.js')],
+            args: [path.join(mcpsDir, entry.name, 'dist', 'index.js')],
             type: 'stdio',
             configPath: pkgPath,
             tools: [],

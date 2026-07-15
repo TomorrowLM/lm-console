@@ -41,6 +41,15 @@ export interface CacheEntry {
   cachedAt: string;
 }
 
+export interface McpCacheEntry {
+  serverName: string;
+  command: string;
+  args: string[];
+  scope: string;
+  targets: string[];
+  injectedAt: string;
+}
+
 export interface McpServerMeta {
   name: string;
   command: string;
@@ -54,4 +63,16 @@ export interface McpToolMeta {
   serverName: string;
   name: string;
   description: string;
+}
+
+export interface DailySnapshot {
+  date: string;
+  totalHits: number;
+  todayHits: number;
+  skillCount: number;
+  mcpCount: number;
+  avgSuccess: number;
+  topSkills: { name: string; hits: number }[];
+  topMcp: { name: string; hits: number }[];
+  updatedAt: string;
 }

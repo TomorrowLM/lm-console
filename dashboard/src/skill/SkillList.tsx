@@ -151,7 +151,7 @@ export default function SkillList() {
                         {isSelected ? '✓' : ''}
                       </span>
                       <span style={{ fontWeight: 'bold', fontSize: '1rem' }}>{skill.name}</span>
-                      {isCached && <span style={{ fontSize: '0.7rem', color: '#38bdf8' }}>● 已缓存</span>}
+                      {isCached && <span style={{ fontSize: '0.7rem', color: '#4ade80', background: '#064e3b', padding: '0.1rem 0.35rem', borderRadius: 4 }}>已注入</span>}
                     </div>
                     <span style={{ fontSize: '0.75rem', color: '#94a3b8' }}>
                       注入: {skill.injectionTargets.join(', ')}

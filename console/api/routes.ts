@@ -8,7 +8,9 @@ import type { SkillCache, CacheEntry } from '../skill/cache.js';
 import type { SkillInjector } from '../skill/injection.js';
 import type { McpRegistry } from '../mcp/registry.js';
 import type { McpInjector } from '../mcp/injection.js';
+import type { McpCache } from '../mcp/cache.js';
 import type { Telemetry } from '../core/telemetry.js';
+import type { DashboardCache } from '../core/dashboard-cache.js';
 
 export function createApiRouter(
   skills: SkillRegistry,
@@ -16,7 +18,9 @@ export function createApiRouter(
   skillInjector: SkillInjector,
   mcpRegistry: McpRegistry,
   mcpInjector: McpInjector,
+  mcpCache: McpCache,
   telemetry: Telemetry,
+  dashboardCache: DashboardCache,
 ) {
   return async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
     const sendJson = (data: any, status = 200) => {
@@ -134,8 +138,14 @@ export function createApiRouter(
         const skill = skills.get(body.skillName);
         if (!skill) return sendJson({ error: '技能不存在' }, 404);
         const projectRoot = scope === 'project' ? body.projectRoot : undefined;
-        const results = await skillInjector.inject(skill, body.targets || ['qoder'], scope, projectRoot);
+        const targets: IdeTarget[] = body.targets || ['qoder'];
+        const results = await skillInjector.inject(skill, targets, scope, projectRoot);
         telemetry.record({ type: 'skill', name: body.skillName, category: skill.category, source: 'ui', trigger: 'manual_inject' });
+        // 自动缓存已注入的技能
+        await skillCache.add({
+          name: skill.name, category: skill.category, description: skill.description,
+          cachedAt: new Date().toISOString(),
+        });
         return sendJson({ results });
       }
 
@@ -154,6 +164,12 @@ export function createApiRouter(
           allResults.push(...results);
           telemetry.record({ type: 'skill', name: skill.name, category: skill.category, source: 'ui', trigger: 'all_inject' });
         }
+        // 自动缓存所有已注入的技能
+        const entries: CacheEntry[] = allSkills.map(s => ({
+          name: s.name, category: s.category, description: s.description,
+          cachedAt: new Date().toISOString(),
+        }));
+        await skillCache.setMany(entries);
 
         return sendJson({ results: allResults, count: allSkills.length });
       }
@@ -164,8 +180,18 @@ export function createApiRouter(
         const scope: InjectScope = body.scope || 'project';
         if (scope === 'project' && !body.projectRoot) return sendJson({ error: '项目级注入必须指定 projectRoot' }, 400);
         const projectRoot = scope === 'project' ? body.projectRoot : undefined;
-        const results = await mcpInjector.inject(body.serverName, body.command, body.args, body.targets || ['qoder'], scope, projectRoot);
+        const targets: IdeTarget[] = body.targets || ['qoder'];
+        const results = await mcpInjector.inject(body.serverName, body.command, body.args, targets, scope, projectRoot);
         telemetry.record({ type: 'mcp', name: body.serverName, category: 'mcp', source: 'ui', trigger: 'manual_inject' });
+        // 自动缓存已注入的 MCP
+        await mcpCache.add({
+          serverName: body.serverName,
+          command: body.command,
+          args: body.args || [],
+          scope,
+          targets,
+          injectedAt: new Date().toISOString(),
+        });
         return sendJson({ results });
       }
 
@@ -187,6 +213,70 @@ export function createApiRouter(
       if (method === 'GET' && url.pathname === '/api/recent') {
         const limit = parseInt(url.searchParams.get('limit') || '50', 10);
         return sendJson(telemetry.getRecent(limit));
+      }
+
+      // GET /api/mcp/cached — 获取已缓存的 MCP 注入记录
+      if (method === 'GET' && url.pathname === '/api/mcp/cached') {
+        return sendJson(mcpCache.getAll());
+      }
+
+      // DELETE /api/mcp/cache — 移除缓存的 MCP 记录
+      if (method === 'DELETE' && url.pathname === '/api/mcp/cache') {
+        const name = url.searchParams.get('name');
+        if (name) {
+          await mcpCache.remove(name);
+        } else {
+          await mcpCache.clear();
+        }
+        return sendJson({ ok: true });
+      }
+
+      // GET /api/injected — 获取所有已注入的项目（技能 + MCP）
+      if (method === 'GET' && url.pathname === '/api/injected') {
+        return sendJson({
+          skills: skillCache.getAll(),
+          mcpServers: mcpCache.getAll(),
+        });
+      }
+
+      // GET /api/dashboard/cache — 获取 Dashboard 缓存快照
+      if (method === 'GET' && url.pathname === '/api/dashboard/cache') {
+        const date = url.searchParams.get('date');
+        if (date) {
+          return sendJson(dashboardCache.getSnapshot(date) || null);
+        }
+        const days = parseInt(url.searchParams.get('days') || '30', 10);
+        return sendJson(dashboardCache.getRecentSnapshots(days));
+      }
+
+      // POST /api/dashboard/cache — 保存当前 Dashboard 快照
+      if (method === 'POST' && url.pathname === '/api/dashboard/cache') {
+        const body = JSON.parse(await readBody(req));
+        const stats = [...telemetry.getStats().values()];
+        const skillStats = stats.filter(s => s.type === 'skill');
+        const mcpStats = stats.filter(s => s.type === 'mcp');
+        const totalHits = stats.reduce((a, b) => a + b.totalHits, 0);
+        const todayHits = stats.reduce((a, b) => a + b.todayHits, 0);
+        const avgSuccess = stats.length > 0
+          ? stats.reduce((a, b) => a + b.successRate, 0) / stats.length : 0;
+        const topSkills = [...skillStats].sort((a, b) => b.totalHits - a.totalHits).slice(0, 5)
+          .map(s => ({ name: s.name, hits: s.totalHits }));
+        const topMcp = [...mcpStats].sort((a, b) => b.totalHits - a.totalHits).slice(0, 5)
+          .map(s => ({ name: s.name, hits: s.totalHits }));
+
+        const date = body.date || new Date().toISOString().slice(0, 10);
+        await dashboardCache.upsertSnapshot({
+          date,
+          totalHits,
+          todayHits,
+          skillCount: skillStats.length,
+          mcpCount: mcpStats.length,
+          avgSuccess,
+          topSkills,
+          topMcp,
+          updatedAt: new Date().toISOString(),
+        });
+        return sendJson({ ok: true, date });
       }
 
       // GET /health

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import type { SkillMeta } from '../types';
+import type { SkillMeta, CacheEntry, McpCacheEntry } from '../types';
 
 type IdeTarget = 'qoder' | 'claude' | 'vscode' | 'copilot' | 'openclaw' | 'trae';
 type InjectScope = 'global' | 'project';
@@ -16,12 +16,12 @@ interface McpPreset {
 
 const MCP_PRESETS: McpPreset[] = [
   {
-    key: 'front-mcp',
-    label: '🧪 front-mcp',
+    key: 'lm-mcp-server',
+    label: '🧪 lm-mcp-server',
     description: '自研 LM MCP 服务器（Swagger 解析 / API 生成 / UI 生成）',
     serverName: 'lm-mcp-server',
     command: 'node',
-    args: 'libs/mcps/front-mcp/dist/index.js',
+    args: 'libs/mcps/lm-mcp-server/dist/index.js',
   },
   {
     key: 'figma',
@@ -58,6 +58,8 @@ export default function InjectionPanel() {
   const [loading, setLoading] = useState(false);
   const [projectRoot, setProjectRoot] = useState('');
   const [allSkills, setAllSkills] = useState<SkillMeta[]>([]);
+  const [injectedSkills, setInjectedSkills] = useState<CacheEntry[]>([]);
+  const [injectedMcps, setInjectedMcps] = useState<McpCacheEntry[]>([]);
   const [injectingAll, setInjectingAll] = useState(false);
   const [toasts, setToasts] = useState<{ id: number; type: 'ok' | 'err'; msg: string }[]>([]);
   let toastId = 0;
@@ -69,9 +71,15 @@ export default function InjectionPanel() {
   };
 
   useEffect(() => {
-    fetch('/api/skills')
-      .then(r => r.json())
-      .then(data => setAllSkills(data))
+    Promise.all([
+      fetch('/api/skills').then(r => r.json()),
+      fetch('/api/injected').then(r => r.json()),
+    ])
+      .then(([skillsData, injectedData]) => {
+        setAllSkills(skillsData);
+        setInjectedSkills(injectedData.skills || []);
+        setInjectedMcps(injectedData.mcpServers || []);
+      })
       .catch(() => {});
   }, []);
 
@@ -285,6 +293,9 @@ export default function InjectionPanel() {
               }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', flex: 1, minWidth: 0 }}>
                   <span style={{ fontWeight: 500, whiteSpace: 'nowrap' }}>{s.name}</span>
+                  {injectedSkills.some(c => c.name === s.name) && (
+                    <span style={{ fontSize: '0.65rem', color: '#4ade80', background: '#064e3b', padding: '0.1rem 0.35rem', borderRadius: 4 }}>已注入</span>
+                  )}
                   <span style={{ color: '#64748b', fontSize: '0.75rem' }}>{s.category}</span>
                   <span style={{ color: '#475569', fontSize: '0.75rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.description}</span>
                 </div>
@@ -333,6 +344,9 @@ export default function InjectionPanel() {
                   }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', flex: 1, minWidth: 0 }}>
                     <span style={{ fontWeight: 500 }}>{p.label}</span>
+                    {injectedMcps.some(m => m.serverName === p.serverName) && (
+                      <span style={{ fontSize: '0.65rem', color: '#4ade80', background: '#064e3b', padding: '0.1rem 0.35rem', borderRadius: 4 }}>已注入</span>
+                    )}
                     <span style={{ color: '#64748b', fontSize: '0.75rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.description}</span>
                   </div>
                   <span style={{ color: selectedPreset === p.key ? '#38bdf8' : '#475569', marginLeft: '0.5rem', flexShrink: 0 }}>

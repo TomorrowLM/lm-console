@@ -1,6 +1,18 @@
 import os from 'os';
 import path from 'path';
+import crypto from 'crypto';
 import type { IdeTarget, InjectScope } from './types.js';
+
+/** 将服务器名称转为目录安全 ID */
+function sanitizeServerId(name: string): string {
+  const base = name
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 40);
+  const hash = crypto.createHash('md5').update(name).digest('hex').slice(0, 8);
+  return `${base}-${hash}`;
+}
 
 export class PathResolver {
   private home = os.homedir();
@@ -44,6 +56,24 @@ export class PathResolver {
     return this.globalMcpConfigPath(target);
   }
 
+  /** 返回 Trae IDE 的 MCP 目录基础路径（用于目录结构注入） */
+  traeMcpBaseDir(scope: InjectScope, projectRoot: string): string {
+    if (scope === 'project') {
+      return path.join(projectRoot, '.trae', 'mcps');
+    }
+    return path.join(this.home, '.trae', 'mcps');
+  }
+
+  /**
+   * 返回 Trae IDE MCP 服务器的完整目录路径
+   * Trae 格式: <base>/<server-id>/solo_agent/<server-name>/
+   */
+  traeMcpServerDir(scope: InjectScope, projectRoot: string, serverName: string): string {
+    const base = this.traeMcpBaseDir(scope, projectRoot);
+    const serverId = sanitizeServerId(serverName);
+    return path.join(base, serverId, 'solo_agent', serverName);
+  }
+
   private globalSkillDir(target: IdeTarget): string {
     switch (target) {
       case 'qoder':
@@ -79,8 +109,14 @@ export class PathResolver {
         }
         return path.join(this.home, '.config', 'Qoder', 'SharedClientCache', 'mcp.json');
       case 'trae':
-        // Trae IDE 的全局 MCP 配置存放在 ~/.trae/mcps/ 文件夹下
-        return path.join(this.home, '.trae', 'mcps.json');
+        // Trae IDE 的全局 MCP 配置实际路径
+        if (os.platform() === 'darwin') {
+          return path.join(this.home, 'Library', 'Application Support', 'Trae', 'User', 'mcp.json');
+        }
+        if (os.platform() === 'win32') {
+          return path.join(process.env.APPDATA || path.join(this.home, 'AppData', 'Roaming'), 'Trae', 'User', 'mcp.json');
+        }
+        return path.join(this.home, '.config', 'Trae', 'User', 'mcp.json');
       default:
         return '';
     }

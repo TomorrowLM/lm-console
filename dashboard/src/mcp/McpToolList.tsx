@@ -1,15 +1,18 @@
 import React, { useEffect, useState } from 'react';
-import type { McpServerMeta } from '../types';
+import type { McpServerMeta, McpCacheEntry } from '../types';
 
 export default function McpToolList() {
   const [servers, setServers] = useState<McpServerMeta[]>([]);
   const [loading, setLoading] = useState(true);
   const [probing, setProbing] = useState<string | null>(null);
+  const [injectedMcps, setInjectedMcps] = useState<McpCacheEntry[]>([]);
 
   const fetchServers = () => {
-    fetch('/api/mcp-servers')
-      .then(r => r.json())
-      .then(data => { setServers(data); setLoading(false); })
+    Promise.all([
+      fetch('/api/mcp-servers').then(r => r.json()),
+      fetch('/api/mcp/cached').then(r => r.json()),
+    ])
+      .then(([data, cached]) => { setServers(data); setInjectedMcps(cached); setLoading(false); })
       .catch(() => setLoading(false));
   };
 
@@ -48,9 +51,12 @@ export default function McpToolList() {
             borderLeft: `4px solid ${server.error ? '#f87171' : server.tools.length > 0 ? '#4ade80' : '#94a3b8'}`,
           }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
-              <div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                 <span style={{ fontWeight: 'bold', fontSize: '1.1rem' }}>{server.name}</span>
-                <span style={{ color: '#64748b', fontSize: '0.85rem', marginLeft: '0.75rem' }}>
+                {injectedMcps.some(m => m.serverName === server.name) && (
+                  <span style={{ fontSize: '0.7rem', color: '#4ade80', background: '#064e3b', padding: '0.1rem 0.35rem', borderRadius: 4 }}>已注入</span>
+                )}
+                <span style={{ color: '#64748b', fontSize: '0.85rem' }}>
                   {server.command} {server.args.join(' ')}
                 </span>
               </div>

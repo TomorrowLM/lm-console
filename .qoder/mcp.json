@@ -3,7 +3,7 @@
     "lm-mcp-server": {
       "command": "node",
       "args": [
-        "libs/mcps/front-mcp/dist/index.js"
+        "/Users/zm/lm/lm-console/libs/mcps/front-mcp/dist/index.js"
       ],
       "type": "stdio"
     }

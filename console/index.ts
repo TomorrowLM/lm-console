@@ -10,7 +10,9 @@ import { SkillCache } from './skill/cache.js';
 import { SkillInjector } from './skill/injection.js';
 import { McpRegistry } from './mcp/registry.js';
 import { McpInjector } from './mcp/injection.js';
+import { McpCache } from './mcp/cache.js';
 import { Telemetry } from './core/telemetry.js';
+import { DashboardCache } from './core/dashboard-cache.js';
 import { PathResolver } from './core/path-resolver.js';
 import { WsServer } from './core/ws-server.js';
 import { createApiRouter } from './api/routes.js';
@@ -32,6 +34,10 @@ async function main() {
   const skillRegistry = new SkillRegistry();
   const skillCache = new SkillCache(CACHE_DIR);
   await skillCache.load();
+  const mcpCache = new McpCache(CACHE_DIR);
+  await mcpCache.load();
+  const dashboardCache = new DashboardCache(CACHE_DIR);
+  await dashboardCache.load();
   const mcpRegistry = new McpRegistry(PROJECT_ROOT);
   const skillInjector = new SkillInjector(pathResolver, PROJECT_ROOT);
   const mcpInjector = new McpInjector(pathResolver, PROJECT_ROOT);
@@ -104,7 +110,7 @@ async function main() {
 
   mcp.tool('inject_mcp', '将 MCP 服务器注册到 IDE 的 mcp.json', {
     serverName: z.string(), command: z.string(), args: z.array(z.string()),
-    targets: z.array(z.enum(['qoder', 'claude', 'vscode'])),
+    targets: z.array(z.enum(['qoder', 'claude', 'vscode', 'trae'])),
     scope: z.enum(['global', 'project']).default('project'),
     projectRoot: z.string().optional(),
   }, async (params) => {
@@ -144,7 +150,7 @@ async function main() {
 
   // 4. HTTP + WS server
   const httpServer = new Server();
-  const apiRouter = createApiRouter(skillRegistry, skillCache, skillInjector, mcpRegistry, mcpInjector, telemetry);
+  const apiRouter = createApiRouter(skillRegistry, skillCache, skillInjector, mcpRegistry, mcpInjector, mcpCache, telemetry, dashboardCache);
   httpServer.on('request', apiRouter);
   new WsServer(httpServer, telemetry);
 
@@ -154,6 +160,31 @@ async function main() {
     console.error(`[lm-console] API: http://localhost:${PORT}/api/skills`);
     console.error(`[lm-console] WS: ws://localhost:${PORT}/ws`);
   });
+
+  // 自动每日快照：每 30 分钟检查一次，如果当天没有快照就保存
+  const autoSnapshot = async () => {
+    const today = new Date().toISOString().slice(0, 10);
+    if (!dashboardCache.getSnapshot(today)) {
+      const stats = [...telemetry.getStats().values()];
+      const skillStats = stats.filter(s => s.type === 'skill');
+      const mcpStats = stats.filter(s => s.type === 'mcp');
+      await dashboardCache.upsertSnapshot({
+        date: today,
+        totalHits: stats.reduce((a, b) => a + b.totalHits, 0),
+        todayHits: stats.reduce((a, b) => a + b.todayHits, 0),
+        skillCount: skillStats.length,
+        mcpCount: mcpStats.length,
+        avgSuccess: stats.length > 0 ? stats.reduce((a, b) => a + b.successRate, 0) / stats.length : 0,
+        topSkills: [...skillStats].sort((a, b) => b.totalHits - a.totalHits).slice(0, 5).map(s => ({ name: s.name, hits: s.totalHits })),
+        topMcp: [...mcpStats].sort((a, b) => b.totalHits - a.totalHits).slice(0, 5).map(s => ({ name: s.name, hits: s.totalHits })),
+        updatedAt: new Date().toISOString(),
+      });
+      console.error(`[lm-console] Auto-saved daily snapshot: ${today}`);
+    }
+  };
+  setInterval(autoSnapshot, 30 * 60 * 1000);
+  // 启动后 5 秒执行第一次
+  setTimeout(autoSnapshot, 5000);
 
   // 5. MCP connection
   const transport = new StdioServerTransport();
